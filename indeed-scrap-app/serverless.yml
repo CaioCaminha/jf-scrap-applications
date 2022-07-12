@@ -1,0 +1,21 @@
+org: caiocaminha
+app: indeed-scrap-app
+service: indeed-scrap-app
+
+frameworkVersion: '3'
+
+
+provider:
+  name: aws
+  runtime: python3.8
+  versionFunctions: false
+  memorySize: 128
+  region: us-east-1
+
+functions:
+  indeed-scrap-app:
+    handler: handler.scrap
+    events:
+      # Invoke Lambda function every 2nd minute from Mon-Fri
+      - schedule: cron(0 18 * * ? *)
+    timeout: 500
