@@ -1,4 +1,5 @@
 import datetime
+from distutils.log import Log
 import json
 import logging
 from urllib import response
@@ -8,22 +9,26 @@ from botocore.exceptions import UnknownKeyError
 from bs4 import BeautifulSoup
 import re
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+LOG = logging.getLogger(__name__)
+LOG.setLevel(logging.INFO)
 
 AWS_REGION = 'us-east-1'
-indeed_base_url = 'https://www.indeed.com/jobs?q&l=Remote&sc=0kf%3Aattr(DSQF7)jt(' \
+MESSAGE_GROUP = 'messageGroup1'
+SQS_INDEED_QUEUE = "https://sqs.us-east-1.amazonaws.com/926265474128/jf-indeed.fifo"
+TABLE_NAME = 'jf-job-finder'
+
+INDEED_BASE_URL = 'https://www.indeed.com/jobs?q&l=Remote&sc=0kf%3Aattr(DSQF7)jt(' \
                          'contract)%3B&rbl=Remote&jlid=aaa2b906602aa8f5&fromage=1'
-indeed_url_job_page = 'https://www.indeed.com/viewjob'
-table_name = 'jf-job-finder'
+INDEED_URL_JOB_PAGE = 'https://www.indeed.com/viewjob'
+
 
 sqs_client = boto3.client('sqs', region_name=AWS_REGION)
-dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table(table_name)
+dynamodb = boto3.resource('dynamodb').Table(TABLE_NAME)
+
 
 def scrap(event, context):
 
-    html_text = requests.get(indeed_base_url).text
+    html_text = requests.get(INDEED_BASE_URL).text
     
     #lxml is the html parser
     soup = BeautifulSoup(html_text, 'lxml')
@@ -36,21 +41,20 @@ def scrap(event, context):
     for job_element in job_list:
         try:
             job = {}
-
-            div_title = job_element.find('h2', class_='jobTitle jobTitle-newJob css-bdjp2m eu4oa1w0')
+            job_id = ''
             title = ''
 
+            div_title = job_element.find('h2', class_='jobTitle jobTitle-newJob css-bdjp2m eu4oa1w0')
             company = job_element.find('span', class_='companyName')
-
-            job_id = ''
 
             if div_title is not None and company is not None:
                 title = div_title.a.span.text
-
                 job_id = div_title.a['id'].replace('job_', '')
+
+                #realizar o append apenas se a chamada putItem ao dynamodb retornar sucesso
                 processed_jobs.append(job_id)
 
-                url = f'{indeed_url_job_page}?jk={job_id}'
+                url = f'{INDEED_URL_JOB_PAGE}?jk={job_id}'
 
                 html_job_page = requests.get(url).text
                 job_soup = BeautifulSoup(html_job_page, 'lxml')
@@ -64,19 +68,21 @@ def scrap(event, context):
                 job["Company"] = company.text
                 
                 
-            response_dynamodb = table.put_item(TableName=table_name, Item=job)
-            logger.info(response_dynamodb['ResponseMetadata']['HTTPStatusCode'])
+            response_dynamodb = dynamodb.put_item(TableName=TABLE_NAME, Item=job)
+            
+            #If ternário em python
+            processed_jobs.append(job_id) if response_dynamodb['ResponseMetadata']['HTTPStatusCode'] == 200 else LOG.error("Job not saved into DynamoDB")
         except Exception as err:
-            logger.error(f'Error occurred {err}') 
+            LOG.error(f'Error occurred {err}') 
     
     message = {'ids': processed_jobs}
     response = sqs_client.send_message(
-        QueueUrl="https://sqs.us-east-1.amazonaws.com/926265474128/jf-indeed.fifo",
+        QueueUrl= SQS_INDEED_QUEUE,
         MessageBody=json.dumps(message),
-        MessageGroupId='messageGroup1'
+        MessageGroupId=MESSAGE_GROUP
     )
-    logger.info(response)
+    LOG.info(response)
     if response['ResponseMetadata']['HTTPStatusCode'] is 200:
-        logger.info(f'Message sent to sqs | response: {response}')
+        LOG.info(f'Message sent to sqs | response: {response}')
     else:
-        logger.error('Could not sent message to sqs')
+        LOG.error('Could not sent message to sqs')
