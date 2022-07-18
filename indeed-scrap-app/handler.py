@@ -16,6 +16,7 @@ AWS_REGION = 'us-east-1'
 MESSAGE_GROUP = 'messageGroup1'
 SQS_INDEED_QUEUE = "https://sqs.us-east-1.amazonaws.com/926265474128/jf-indeed.fifo"
 TABLE_NAME = 'jf-job-finder'
+PLATFORM_TYPE_ITEM = "indeed"
 
 INDEED_BASE_URL = 'https://www.indeed.com/jobs?q&l=Remote&sc=0kf%3Aattr(DSQF7)jt(' \
                          'contract)%3B&rbl=Remote&jlid=aaa2b906602aa8f5&fromage=1'
@@ -51,9 +52,6 @@ def scrap(event, context):
                 title = div_title.a.span.text
                 job_id = div_title.a['id'].replace('job_', '')
 
-                #realizar o append apenas se a chamada putItem ao dynamodb retornar sucesso
-                processed_jobs.append(job_id)
-
                 url = f'{INDEED_URL_JOB_PAGE}?jk={job_id}'
 
                 html_job_page = requests.get(url).text
@@ -62,14 +60,15 @@ def scrap(event, context):
 
                 # the strip() method removes all the blank enters, creating an unique text
                 job['id'] = job_id
-                job["Description"] = job_description.strip()
-                job["JobUrl"] = url
-                job["Title"] = title
-                job["Company"] = company.text
+                job["description"] = job_description.strip()
+                job["job_url"] = url
+                job["title"] = title
+                job["company"] = company.text
+                job["platform_type_item"] = PLATFORM_TYPE_ITEM
                 
                 
             response_dynamodb = dynamodb.put_item(TableName=TABLE_NAME, Item=job)
-            
+
             #If ternário em python
             processed_jobs.append(job_id) if response_dynamodb['ResponseMetadata']['HTTPStatusCode'] == 200 else LOG.error("Job not saved into DynamoDB")
         except Exception as err:
@@ -82,7 +81,7 @@ def scrap(event, context):
         MessageGroupId=MESSAGE_GROUP
     )
     LOG.info(response)
-    if response['ResponseMetadata']['HTTPStatusCode'] is 200:
+    if response['ResponseMetadata']['HTTPStatusCode'] == 200:
         LOG.info(f'Message sent to sqs | response: {response}')
     else:
         LOG.error('Could not sent message to sqs')
