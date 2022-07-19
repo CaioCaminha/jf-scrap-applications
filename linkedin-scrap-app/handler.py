@@ -25,6 +25,7 @@ dynamodb = boto3.resource('dynamodb').Table(TABLE_NAME)
 
 #sqs configuration
 SQS_LINKEDIN_QUEUE = 'https://sqs.us-east-1.amazonaws.com/926265474128/jf-linkedin.fifo'
+MESSAGE_GROUP = 'messageGroup1'
 sqs_client = boto3.client('sqs', region_name= AWS_REGION)
 
 def scrap(event, context):
@@ -73,5 +74,16 @@ def scrap(event, context):
             processed_jobs.append(job_id) if response_code == 200 else LOG.error("Job not saved into DynamoDB")
         except Exception as err:
             LOG.error(f'Error occurred {err}') if str(err) != 'find() takes no keyword arguments' else LOG.info('') 
-            
+    
+    message = {'ids': processed_jobs}
+    
+    response = sqs_client.send_message(
+        QueueUrl= SQS_LINKEDIN_QUEUE,
+        MessageBody=json.dumps(message),
+        MessageGroupId=MESSAGE_GROUP
+    )
+    if response['ResponseMetadata']['HTTPStatusCode'] == 200:
+        LOG.info(f'Message sent to sqs | response: {response}')
+    else:
+        LOG.error('Could not sent message to sqs')
 
